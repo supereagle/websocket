@@ -69,6 +69,26 @@ func reader(ws *websocket.Conn) {
 	}
 }
 
+func appendFile() {
+	file, err := os.OpenFile(filename, os.O_APPEND | os.O_RDWR, 0666)
+	defer file.Close()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fileTicker := time.NewTicker(filePeriod)
+	for {
+		select {
+		case <-fileTicker.C:
+			_, err = file.WriteString("hello\n")
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+}
+
 func writer(ws *websocket.Conn, lastMod time.Time) {
 	lastError := ""
 	pingTicker := time.NewTicker(pingPeriod)
@@ -125,6 +145,7 @@ func serveWs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go writer(ws, lastMod)
+	go appendFile()
 	reader(ws)
 }
 
