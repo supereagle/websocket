@@ -5,8 +5,10 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -56,6 +58,32 @@ func readFileIfModified(lastMod time.Time) ([]byte, time.Time, error) {
 	return p, fi.ModTime(), nil
 }
 
+func tailFile(filename string, data chan []byte, stop chan int) {
+	f, err := os.Open(filename)
+	if err != nil {
+		data <- []byte("Interval error happens, TERMINATE")
+		stop <- 1
+		return
+	}
+	defer f.Close()
+
+	rd := bufio.NewReader(f)
+	for {
+		line, err := rd.ReadBytes('\n')
+
+		if io.EOF == err {
+			continue
+		}
+
+		if err != nil  {
+			data <- []byte("Interval error happens, TERMINATE")
+			stop <- 1
+			break
+		}
+		data <- line
+	}
+}
+
 func reader(ws *websocket.Conn) {
 	defer ws.Close()
 	ws.SetReadLimit(512)
@@ -90,37 +118,28 @@ func appendFile() {
 }
 
 func writer(ws *websocket.Conn, lastMod time.Time) {
-	lastError := ""
+	data := make(chan []byte, 10)
+	var p []byte
+	stop := make(chan int, 0)
+
 	pingTicker := time.NewTicker(pingPeriod)
-	fileTicker := time.NewTicker(filePeriod)
 	defer func() {
 		pingTicker.Stop()
-		fileTicker.Stop()
 		ws.Close()
 	}()
+
+	go tailFile(filename, data, stop)
 	for {
 		select {
-		case <-fileTicker.C:
-			var p []byte
-			var err error
-
-			p, lastMod, err = readFileIfModified(lastMod)
-
-			if err != nil {
-				if s := err.Error(); s != lastError {
-					lastError = s
-					p = []byte(lastError)
-				}
-			} else {
-				lastError = ""
+		case p = <-data:
+			ws.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := ws.WriteMessage(websocket.TextMessage, p); err != nil {
+				return
 			}
-
-			if p != nil {
-				ws.SetWriteDeadline(time.Now().Add(writeWait))
-				if err := ws.WriteMessage(websocket.TextMessage, p); err != nil {
-					return
-				}
-			}
+		case <-stop:
+			ws.SetWriteDeadline(time.Now().Add(writeWait))
+			ws.WriteMessage(websocket.CloseMessage, []byte{})
+			return
 		case <-pingTicker.C:
 			ws.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
