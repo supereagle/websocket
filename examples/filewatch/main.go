@@ -53,11 +53,30 @@ func readFileIfModified(lastMod time.Time) ([]byte, time.Time, error) {
 	if !fi.ModTime().After(lastMod) {
 		return nil, lastMod, nil
 	}
+
+	result, err := readFile(filename[0])
+	if err != nil {
+		return nil, lastMod, nil
+	}
+	
+	if len(filename) > 1 {
+		result2, err := readFile(filename[1])
+		if err != nil {
+			return nil, lastMod, nil
+		}
+		result = append(result, result2...)
+	}
+
+	return result, fi.ModTime(), nil
+}
+
+func readFile(fileName string) ([]byte, error) {
 	p, err := ioutil.ReadFile(filename[0])
 	if err != nil {
-		return nil, fi.ModTime(), err
+		return nil, err
 	}
-	return p, fi.ModTime(), nil
+
+	return p, nil
 }
 
 func tailFile(filename []string, data chan []byte, stop chan int) {
